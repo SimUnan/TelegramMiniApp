@@ -6,9 +6,6 @@ interface TelegramWebApp {
       close(): void;
       showAlert(message: string): void;
       requestContact(): Promise<{ phone_number: string }>;
-      version: any;
-      platform:any;
-      initDataUnsafe: any;
       MainButton: {
         text: string;
         setText(text: string): void;
