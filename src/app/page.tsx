@@ -1,136 +1,156 @@
 "use client"
 
-// pages/index.tsx
 import { useEffect, useState } from 'react';
-import Head from 'next/head';
+import Script from 'next/script';
 
 export default function Home() {
   const [telegram, setTelegram] = useState<any>(null);
   const [userPhone, setUserPhone] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
+  const [scriptLoaded, setScriptLoaded] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
 
   useEffect(() => {
-    // Initialize Telegram WebApp
-    if (window.Telegram && window.Telegram.WebApp) {
-      const tg = window.Telegram.WebApp;
-      setTelegram(tg);
+    // Wait for the script to load before trying to access Telegram object
+    if (!scriptLoaded) return;
+
+    // Check if we're in a browser environment
+    if (typeof window !== 'undefined') {
+      console.log('Window object exists:', !!window);
+      console.log('Telegram object exists:', !!window.Telegram);
       
-      // Expand the WebApp to the full height
-      tg.expand();
+      if (window.Telegram && window.Telegram.WebApp) {
+        console.log('WebApp object exists:', !!window.Telegram.WebApp);
+        const tg = window.Telegram.WebApp;
+        setTelegram(tg);
+        
+        try {
+          // Expand the WebApp to the full height
+          tg.expand();
+          console.log('WebApp expanded successfully');
+        } catch (err) {
+          console.error('Error expanding WebApp:', err);
+          setError('Error initializing Telegram WebApp');
+        }
+      } else {
+        setError('This app must be opened from Telegram');
+        console.log('Telegram WebApp not available - might not be opened from Telegram');
+      }
     }
-  }, []);
+  }, [scriptLoaded]);
+
+  // Handle manual testing outside Telegram
+  const simulatePhoneNumberSuccess = () => {
+    if (!window.Telegram || !window.Telegram.WebApp) {
+      setUserPhone('+1234567890'); // Simulate a phone number
+      setSubmitted(true);
+      setIsLoading(false);
+    }
+  };
 
   const requestPhoneNumber = () => {
-    if (!telegram) return;
+    console.log("CLICKED")
+    if (!telegram && !window.Telegram) {
+      // For testing outside Telegram
+      simulatePhoneNumberSuccess();
+      return;
+    }
     
     setIsLoading(true);
+    setError('');
     
-    // Request phone number through Telegram API
-    telegram.requestContact()
-      .then((contact: { phone_number: string }) => {
-        if (contact && contact.phone_number) {
-          setUserPhone(contact.phone_number);
-          setSubmitted(true);
-        }
-      })
-      .catch((error: any) => {
-        console.error('Error requesting phone number:', error);
-        alert('Failed to get phone number. Please try again.');
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
+    try {
+      // Wrapped in try/catch in case requestContact isn't available
+      console.log('Requesting phone number...');
+      
+      // Check if we're in Telegram
+      if (telegram && telegram.requestContact) {
+        telegram.requestContact()
+          .then((contact: { phone_number: string }) => {
+            console.log('Phone received:', contact);
+            if (contact && contact.phone_number) {
+              setUserPhone(contact.phone_number);
+              setSubmitted(true);
+            } else {
+              setError('No phone number received');
+            }
+          })
+          .catch((err: any) => {
+            console.error('Error requesting phone:', err);
+            setError('Failed to get phone number. Please try again.');
+            
+            // For demo purposes - simulate success after error
+            simulatePhoneNumberSuccess();
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+      } else {
+        // For testing outside Telegram
+        console.log('RequestContact method not available - simulating success');
+        simulatePhoneNumberSuccess();
+      }
+    } catch (err) {
+      console.error('Exception requesting phone:', err);
+      setError('Error requesting phone number');
+      setIsLoading(false);
+      
+      // For demo purposes
+      simulatePhoneNumberSuccess();
+    }
   };
 
   return (
-    <div className="container">
-      <Head>
-        <title>Telegram Phone Number Mini-App</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-      </Head>
-
-      <main>
-        <h1>Phone Number Collection</h1>
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center">
+      <Script 
+        src="https://telegram.org/js/telegram-web-app.js"
+        onLoad={() => {
+          console.log('Telegram script loaded');
+          setScriptLoaded(true);
+        }}
+        onError={() => {
+          console.error('Failed to load Telegram script');
+          setError('Failed to load Telegram integration');
+        }}
+      />
+      
+      <main className="max-w-lg mx-auto p-4">
+        <h1 className="text-2xl font-bold mb-6 text-gray-800">Phone Number Collection</h1>
+        
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
+          </div>
+        )}
         
         {isLoading ? (
-          <p>Loading...</p>
+          <div className="py-4">
+            <p>Loading...</p>
+            <div className="mt-2 w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          </div>
         ) : submitted ? (
-          <div>
-            <p>Thank you for sharing your phone number!</p>
-            <p className="phone-display">Phone: <strong>{userPhone}</strong></p>
+          <div className="py-4">
+            <p className="mb-4">Thank you for sharing your phone number!</p>
+            <p className="bg-gray-100 rounded-lg py-3 px-4 inline-block text-lg">
+              Phone: <strong>{userPhone}</strong>
+            </p>
           </div>
         ) : (
-          <div>
+          <div className="py-4">
             <p>Please click the button below to share your phone number with us.</p>
-            <button 
-              className="share-button" 
+            <button
+              className="mt-4 bg-blue-500 hover:bg-blue-600 text-white font-medium py-3 px-6 rounded-lg transition-colors"
               onClick={requestPhoneNumber}
             >
               Share Phone Number
             </button>
-            <p className="privacy-note">
+            <p className="text-sm text-gray-500 mt-6">
               Your privacy is important to us. Your phone number will only be displayed on this screen.
             </p>
           </div>
         )}
       </main>
-
-      <style jsx>{`
-        .container {
-          min-height: 100vh;
-          padding: 1rem;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          text-align: center;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-        }
-        
-        main {
-          padding: 1rem;
-          max-width: 800px;
-        }
-        
-        h1 {
-          margin-bottom: 2rem;
-          font-size: 1.5rem;
-          color: #333;
-        }
-        
-        .privacy-note {
-          font-size: 0.8rem;
-          opacity: 0.8;
-          margin-top: 2rem;
-        }
-
-        .share-button {
-          background-color: #0088cc;
-          color: white;
-          border: none;
-          border-radius: 8px;
-          padding: 12px 24px;
-          font-size: 16px;
-          cursor: pointer;
-          margin-top: 20px;
-          transition: background-color 0.3s;
-        }
-
-        .share-button:hover {
-          background-color: #006699;
-        }
-
-        .phone-display {
-          font-size: 18px;
-          margin-top: 20px;
-          padding: 15px;
-          background-color: #f0f0f0;
-          border-radius: 8px;
-          display: inline-block;
-        }
-      `}</style>
     </div>
   );
 }
