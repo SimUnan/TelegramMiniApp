@@ -11,6 +11,7 @@ export default function Home() {
   const [scriptLoaded, setScriptLoaded] = useState<boolean>(false);
   const [debug, setDebug] = useState<string[]>([]);
   const [error, setError] = useState<string>('');
+  const [userData, setUserData] = useState<any>(null);
 
   // Helper function to add debug messages
   const addDebug = (message: string) => {
@@ -25,14 +26,8 @@ export default function Home() {
     // Check if we're in a browser environment
     if (typeof window !== 'undefined') {
       addDebug('Checking Telegram environment...');
-      addDebug(`Window object: ${typeof window}`);
-      addDebug(`Telegram object: ${typeof window.Telegram}`);
       
       if (window.Telegram && window.Telegram.WebApp) {
-        addDebug(`WebApp object: ${typeof window.Telegram.WebApp}`);
-        addDebug(`WebApp version: ${window.Telegram.WebApp || 'unknown'}`);
-        addDebug(`Platform: ${window.Telegram.WebApp || 'unknown'}`);
-        
         const tg = window.Telegram.WebApp;
         setTelegram(tg);
         
@@ -41,11 +36,20 @@ export default function Home() {
           tg.expand();
           addDebug('WebApp expanded successfully');
           
-          // Check if requestContact method exists
-          addDebug(`requestContact method: ${typeof tg.requestContact}`);
+          // Log Telegram environment info
+          addDebug(`WebApp version: ${tg.version || 'unknown'}`);
+          addDebug(`Platform: ${tg.platform || 'unknown'}`);
+          
+          // Try to get user data from initDataUnsafe
+          if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            const user = tg.initDataUnsafe.user;
+            setUserData(user);
+            addDebug(`User data available: ${JSON.stringify(user)}`);
+          } else {
+            addDebug('No user data available in initDataUnsafe');
+          }
         } catch (err) {
           addDebug(`Error initializing: ${err instanceof Error ? err.message : String(err)}`);
-          setError('Error initializing Telegram WebApp');
         }
       } else {
         addDebug('Telegram WebApp not available');
@@ -54,52 +58,118 @@ export default function Home() {
     }
   }, [scriptLoaded]);
 
-  const requestPhoneNumber = async () => {
-    addDebug('Phone number requested');
+  const requestUserInfo = async () => {
+    addDebug('User info requested');
     setIsLoading(true);
     setError('');
     
     try {
-      // Make sure we're in Telegram
       if (!telegram) {
-        addDebug('Telegram object not available');
         throw new Error('Telegram environment not detected');
       }
       
-      if (typeof telegram.requestContact !== 'function') {
-        addDebug('requestContact is not a function');
-        throw new Error('This Telegram client doesn\'t support phone number requests');
+      // Method 1: Try using the backend approach with getContactInfo API
+      addDebug('Attempting to get user phone via mainButton integration');
+      
+      // Enable main button and set event handlers
+      if (telegram.MainButton) {
+        telegram.MainButton.setText('Share Contact Info');
+        telegram.MainButton.show();
+        
+        // Set up a one-time event handler for the main button
+        const handleMainButtonClick = () => {
+          addDebug('Main button clicked');
+          
+          // Use native UI to request phone sharing
+          if (typeof telegram.requestContact === 'function') {
+            addDebug('Calling requestContact');
+            
+            telegram.requestContact()
+              .then((result: any) => {
+                addDebug(`Contact result: ${JSON.stringify(result)}`);
+                
+                if (result && result.phone_number) {
+                  setUserPhone(result.phone_number);
+                  setSubmitted(true);
+                } else {
+                  // If we have userData but no phone, show user info
+                  if (userData) {
+                    setSubmitted(true);
+                    addDebug('Showing user data without phone number');
+                  } else {
+                    setError('Could not get phone number');
+                  }
+                }
+              })
+              .catch((err: any) => {
+                addDebug(`Contact request error: ${err.message || String(err)}`);
+                setError('Error requesting contact information');
+              })
+              .finally(() => {
+                setIsLoading(false);
+              });
+          } else {
+            addDebug('requestContact not available - showing user info');
+            // If we have userData, show user info instead
+            if (userData) {
+              setSubmitted(true);
+            } else {
+              setError('Contact request method not available');
+            }
+            setIsLoading(false);
+          }
+        };
+        
+        // Add the event handler
+        telegram.MainButton.onClick(handleMainButtonClick);
+        
+        // Return early as the actual action happens on MainButton click
+        setIsLoading(false);
+        return;
       }
       
-      addDebug('Calling telegram.requestContact()');
-      
-      // Use Promise with timeout to handle potential non-response
-      const phonePromise = telegram.requestContact();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timed out')), 10000)
-      );
-      
-      const contact = await Promise.race([phonePromise, timeoutPromise]);
-      
-      addDebug(`Contact response received: ${JSON.stringify(contact)}`);
-      
-      if (contact && contact.phone_number) {
-        addDebug(`Phone number: ${contact.phone_number}`);
-        setUserPhone(contact.phone_number);
-        setSubmitted(true);
+      // Fallback for when MainButton isn't available
+      if (typeof telegram.requestContact === 'function') {
+        addDebug('MainButton not available, calling requestContact directly');
+        
+        telegram.requestContact()
+          .then((result: any) => {
+            addDebug(`Direct contact result: ${JSON.stringify(result)}`);
+            
+            if (result && result.phone_number) {
+              setUserPhone(result.phone_number);
+              setSubmitted(true);
+            } else {
+              // Fallback to just showing user data
+              if (userData) {
+                setSubmitted(true);
+              } else {
+                setError('Could not get phone number');
+              }
+            }
+          })
+          .catch((err: any) => {
+            addDebug(`Direct contact error: ${err.message || String(err)}`);
+            setError('Error requesting contact directly');
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
       } else {
-        addDebug('No phone number in response');
-        setError('Failed to get phone number from Telegram');
+        // If neither approach works, just show user data if available
+        addDebug('No contact request methods available');
+        
+        if (userData) {
+          setSubmitted(true);
+        } else {
+          setError('This Telegram client does not support phone number sharing');
+        }
+        setIsLoading(false);
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      addDebug(`Error in requestPhoneNumber: ${errorMessage}`);
+      addDebug(`Error in requestUserInfo: ${errorMessage}`);
       setError(`Error: ${errorMessage}`);
-      
-      // For testing purposes - uncomment to simulate success
-      // setUserPhone('+1234567890');
-      // setSubmitted(true);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -120,7 +190,7 @@ export default function Home() {
       />
       
       <main className="max-w-lg w-full mx-auto p-4 bg-white rounded-lg shadow-md">
-        <h1 className="text-2xl font-bold mb-6 text-gray-800">Phone Number Collection</h1>
+        <h1 className="text-2xl font-bold mb-6 text-gray-800">Telegram Auth</h1>
         
         {error && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -130,32 +200,51 @@ export default function Home() {
         
         {isLoading ? (
           <div className="py-4">
-            <p>Requesting phone number...</p>
+            <p>Processing request...</p>
             <div className="mt-2 w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
           </div>
         ) : submitted ? (
           <div className="py-4">
-            <p className="mb-4">Thank you for sharing your phone number!</p>
-            <p className="bg-gray-100 rounded-lg py-3 px-4 inline-block text-lg">
-              Phone: <strong>{userPhone}</strong>
-            </p>
+            <p className="mb-4">Authentication successful!</p>
+            
+            {userPhone ? (
+              <div className="bg-gray-100 rounded-lg py-3 px-4 mb-4 text-left">
+                <p className="mb-2"><strong>Phone:</strong> {userPhone}</p>
+              </div>
+            ) : null}
+            
+            {userData ? (
+              <div className="bg-gray-100 rounded-lg py-3 px-4 text-left">
+                <p className="mb-2"><strong>User ID:</strong> {userData.id}</p>
+                <p className="mb-2"><strong>First Name:</strong> {userData.first_name}</p>
+                {userData.last_name && (
+                  <p className="mb-2"><strong>Last Name:</strong> {userData.last_name}</p>
+                )}
+                {userData.username && (
+                  <p className="mb-2"><strong>Username:</strong> @{userData.username}</p>
+                )}
+                {userData.language_code && (
+                  <p><strong>Language:</strong> {userData.language_code}</p>
+                )}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="py-4">
-            <p>Please click the button below to share your phone number with us.</p>
+            <p>Please click the button below to authenticate with Telegram.</p>
             <button
               className="mt-4 bg-blue-500 hover:bg-blue-600 text-white font-medium py-3 px-6 rounded-lg transition-colors"
-              onClick={requestPhoneNumber}
+              onClick={requestUserInfo}
             >
-              Share Phone Number
+              Authenticate with Telegram
             </button>
             <p className="text-sm text-gray-500 mt-6">
-              Your privacy is important to us. Your phone number will only be displayed on this screen.
+              Your privacy is important to us. Your information will only be displayed on this screen.
             </p>
           </div>
         )}
         
-        {/* Debug panel - can be removed in production */}
+        {/* Debug panel */}
         <div className="mt-8 pt-4 border-t border-gray-200">
           <details>
             <summary className="text-sm text-gray-500 cursor-pointer">Debug Info</summary>
@@ -168,7 +257,14 @@ export default function Home() {
               <button
                 className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 py-1 px-2 rounded"
                 onClick={() => {
-                  // Force show phone number for testing
+                  // Force show user data for testing
+                  setUserData({
+                    id: 12345678,
+                    first_name: "Test",
+                    last_name: "User",
+                    username: "testuser",
+                    language_code: "en"
+                  });
                   setUserPhone('+1234567890');
                   setSubmitted(true);
                 }}
